@@ -1,222 +1,308 @@
 import numpy as np
 import pandas as pd
+from random import shuffle
+from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 
-class Node:
-    def __init__(self, feature=None, threshold=None, left=None, right=None, value=None):
-        self.feature = feature  # атрибут для разделения
-        self.threshold = threshold  # порог для разделения
-        self.left = left  # левое поддерево
-        self.right = right  # правое поддерево
-        self.value = value  # значение узла (если это лист)
+# Класс, представляющий узел дерева решений.
+class DecisionTreeNode:
+  def __init__(self, parent_attribute = None, parent_attribute_value = None, attribute = None, entropy = 0.0, samples_count = 0):
+    self.parent_attribute = parent_attribute
+    self.parent_attribute_value = parent_attribute_value
+    self.attribute = attribute
+    self.entropy = entropy
+    self.samples_count = samples_count
+    self.samples = dict()
+    self.probability = dict()
+    self.prediction = None
+    self.children = list()
+# Метод для предсказания класса для входного примера X
+  def predict(self, X):
+    for child in self.children:
+      if X[self.attribute] == child.parent_attribute_value:
+        return child.predict(X)
 
+    return self.prediction
+
+# Метод для предсказания вероятности классов для входного примера X
+  def predict_proba(self, X):
+    for child in self.children:
+      if X[self.attribute] == child.parent_attribute_value:
+        return child.predict_proba(X)
+
+    return self.probability
+
+
+class InformationEntropy:
+  def __init__(self, df: pd.DataFrame, y_label: str):
+    self.y_label = y_label
+    self.y_classes = set(df[y_label].to_list())
+    self.X_values = dict()
+    for label in df.columns:
+      if label != y_label:
+        self.X_values[label] = set(df[label].to_list())
+# Метод для подсчета частоты появления класса в данных
+  def freq(self, df, C_j):
+    return df.loc[df[self.y_label] == C_j].shape[0]
+# Метод для вычисления энтропии для всего набора данных
+  def info(self, df):
+    if df.shape[0] == 0:
+      return 0
+
+    result = 0
+    for y_class in self.y_classes:
+      freq_c_div_df = self.freq(df, y_class) / df.shape[0]
+      if freq_c_div_df == 0:
+        continue
+      result -= freq_c_div_df * np.log2(freq_c_div_df)
+    return result
+# Метод для вычисления взвешенной энтропии для конкретного признака
+  def info_X(self, df, X_label):
+    if df.shape[0] == 0:
+      return 0
+
+    result = 0
+    for attr in self.X_values[X_label]:
+      df_i = df.loc[df[X_label] == attr]
+      if df_i.shape[0] == 0:
+        continue
+      result += df_i.shape[0] * self.info(df_i)
+    result /= df.shape[0]
+    return result
+# Метод для вычисления "split information" для конкретного признака
+  def split_info_X(self, df, X_label):
+    result = 1e-9
+    for attr in self.X_values[X_label]:
+      df_i = df.loc[df[X_label] == attr]
+      if df_i.shape[0] == 0:
+        continue
+      df_i_div_df = df_i.shape[0] / df.shape[0]
+      result -= df_i_div_df * np.log2(df_i_div_df)
+    return result
+# Метод для вычисления относительного выигрыша признака
+  def gain_ratio_X(self, df, X_label):
+    return (self.info(df) - self.info_X(df, X_label)) / self.split_info_X(df, X_label)
+
+
+# Класс для построения и использования дерева решений
 class DecisionTree:
-    def fit(self, X, y):
-        self.root = self._build_tree(X, y)
+  def __init__(self, max_leaf_entropy = 0.0, max_leaf_samples = 1):
+    assert (max_leaf_entropy > 0) or (max_leaf_samples > 0), "Entropy ratio and samples count to define leaf can't be 0 at once"
 
-    def _build_tree(self, X, y):
-        if len(np.unique(y)) == 1:
-            return Node(value=y.iloc[0])
+    self.decision_tree_node = None
+    self.max_leaf_entropy = max_leaf_entropy
+    self.max_leaf_samples = max_leaf_samples
+    self.info_entropy = None
+# Рекурсивный метод для построения дерева решений
+  def build_tree(self, df: pd.DataFrame, TreeNode: DecisionTreeNode):
+    if df.shape[0] == 0:
+      return
 
-        if X.shape[1] == 0:
-            return Node(value=y.mode()[0] if not y.empty else None)
+    best_attr = None
+    best_ratio = 0
+    for attr in self.info_entropy.X_values:
+      ratio = self.info_entropy.gain_ratio_X(df, attr)
+      if best_ratio < ratio:
+        best_attr = attr
+        best_ratio = ratio
 
-        n_features = X.shape[1]
-        n_random_features = int(np.sqrt(n_features))
-        random_features = np.random.choice(X.columns, n_random_features, replace=False)
+    TreeNode.attribute = best_attr
+    TreeNode.entropy = best_ratio
+    max_samples_count = 0
+    for y_class in self.info_entropy.y_classes:
+      TreeNode.samples[y_class] = df.loc[df[self.info_entropy.y_label] == y_class].shape[0]
+      TreeNode.probability[y_class] = TreeNode.samples[y_class] / df.shape[0]
+      if max_samples_count < TreeNode.samples[y_class]:
+        max_samples_count = TreeNode.samples[y_class]
+        TreeNode.prediction = y_class
+    TreeNode.samples_count = df.shape[0]
 
-        best_feature, best_threshold = self._best_split(X[random_features], y)
-        if best_feature is None:
-            return Node(value=y.mode()[0] if not y.empty else None)
-
-        left_indices = X[best_feature] <= best_threshold
-        right_indices = X[best_feature] > best_threshold
-        
-        # Проверка, не пустые ли множества после разбиения
-        if not left_indices.any() or not right_indices.any():
-            return Node(value=y.mode()[0] if not y.empty else None)
-
-        left_node = self._build_tree(X[left_indices], y[left_indices])
-        right_node = self._build_tree(X[right_indices], y[right_indices])
-
-        return Node(feature=best_feature, threshold=best_threshold, left=left_node, right=right_node)
-
-    def _best_split(self, X, y):
-        best_gain = -np.inf
-        best_feature = None
-        best_threshold = None
-        
-        for feature in X.columns:
-            thresholds = X[feature].unique()
-            for threshold in thresholds:
-                gain = self._information_gain(X, y, feature, threshold)
-                if gain > best_gain:
-                    best_gain = gain
-                    best_feature = feature
-                    best_threshold = threshold
-
-        return best_feature, best_threshold
-
-    def _information_gain(self, X, y, feature, threshold):
-        parent_entropy = self._entropy(y)
-
-        # Разделение данных
-        left_indices = X[feature] <= threshold
-        right_indices = X[feature] > threshold
-        
-        if len(y[left_indices]) == 0 or len(y[right_indices]) == 0:
-            return 0  
-
-        left_entropy = self._entropy(y[left_indices])
-        right_entropy = self._entropy(y[right_indices])
-        
-        left_ratio = len(y[left_indices]) / len(y)
-        right_ratio = len(y[right_indices]) / len(y)
-
-        child_entropy = left_ratio * left_entropy + right_ratio * right_entropy
-        gain = parent_entropy - child_entropy
-
-        return gain
-
-    def _entropy(self, y):
-        class_counts = y.value_counts()
-        probabilities = class_counts / len(y)
-        return -np.sum(probabilities * np.log2(probabilities )) 
-
-    def predict(self, X):
-        return np.array([self._predict(sample, self.root) for _, sample in X.iterrows()])
-
-    def _predict(self, sample, node):
-        if node.value is not None:
-            return node.value  
-        if sample[node.feature] <= node.threshold:
-            return self._predict(sample, node.left)
-        else:
-            return self._predict(sample, node.right)
-        
+    if (TreeNode.entropy > self.max_leaf_entropy) and (TreeNode.samples_count > self.max_leaf_samples):
+      for attr in self.info_entropy.X_values[best_attr]:
+        df_loc = df.loc[df[best_attr] == attr]
+        if df_loc.shape[0] > 0:
+          child = DecisionTreeNode()
+          child.parent_attribute = best_attr
+          child.parent_attribute_value = attr
+          TreeNode.children.append(child)
+          self.build_tree(df_loc, TreeNode.children[-1])
+# Метод для обучения дерева решений на данных
+  def fit(self, df: pd.DataFrame, y_label: str):
+    self.info_entropy = InformationEntropy(df, y_label)
+    self.decision_tree_node = DecisionTreeNode()
+    self.build_tree(df, self.decision_tree_node)
+    return self
+# Метод для предсказания классов для входных данных
+  def predict(self, X_test: pd.DataFrame):
+    y_test = []
+    for i in range(X_test.shape[0]):
+      y_test.append(self.decision_tree_node.predict(X_test.iloc[i]))
+    return y_test
+# Метод для предсказания вероятностей классов для входных данных
+  def predict_proba(self, X_test: pd.DataFrame):
+    y_test = []
+    for i in range(X_test.shape[0]):
+      y_test.append(self.decision_tree_node.predict_proba(X_test.iloc[i]))
+    return y_test
 
 
 
+df = pd.read_csv('students.csv')
+goal = 5
+df['SUCCESS'] = df['GRADE'].apply(lambda x: 1 if x >= goal else 0)
 
-def calculate_metrics(y_true, y_pred):
-    tp = fp = fn = tn= 0
-    
-    for true, pred in zip(y_true, y_pred):
-        if pred == 1 and true == 1:
-            tp += 1 
-        elif pred == 1 and true == 0:
-            fp += 1  
-        elif pred == 0 and true == 1:
-            fn += 1 
-        else:
-            tn+=1
+X_labels_count = int(np.round(np.sqrt(len(df.columns)-4)))+1
+X_labels = df.columns[1:].to_list()
+X_labels.remove('COURSE ID')
+X_labels.remove('GRADE')
+X_labels.remove('SUCCESS')
+shuffle(X_labels) 
+X_labels = X_labels[:X_labels_count]
+
+X_attributes = dict()
+for label in X_labels:
+  X_i_set = set(df[label].to_list())
+  X_attributes[label] = X_i_set
+
+y_label = "SUCCESS"
+y_classes = set(df[y_label].to_list())
+y_classes_count=2
+
+data_n = df[X_labels + [y_label]]
+
+X_train, X_test, y_train, y_test = train_test_split(data_n.drop(columns=[y_label]), data_n[y_label], test_size=0.8, random_state=0)
+
+df_train = X_train.join(y_train)
+y_test = y_test.to_list()
+
+dt = DecisionTree(0.001, 10).fit(df_train, y_label)
+predictions = dt.predict(X_test)
+
+def confusion(y_true, y_pred, y_positive = 1):
+  TP, FP, FN, TN = 0, 0, 0, 0
+  for i in range(len(y_true)):
+    if y_pred[i] == y_positive:
+      if y_true[i] == y_positive:
+        TP += 1
+      else:
+        FP += 1
+    else:
+      if y_true[i] == y_positive:
+        FN += 1
+      else:
+        TN += 1
+  return TP, FP, FN, TN
+# функция строит ROC-кривую
+def TPR_by_FPR(y_true, y_probs, y_positive = 1, y_negative = 0, lines_count = 0):
+  use_probs_for_line = lines_count <= 0
+  y_probs_sorted = sorted([v[y_positive] for v in y_probs], reverse = True)
+  # Получение следующее значение прямой классификации
+  def get_classification_line_value(i):
+    if use_probs_for_line:
+      return y_probs_sorted[i]
+    return 1 - i / lines_count
+  # Количество точек в ROC
+  points_count = lines_count + 1
+  if use_probs_for_line:
+    points_count = len(y_probs_sorted)
+  # Списки значений
+  FPR_values, TPR_values = [0], [0]
+  last_line_value = -123
+  for i in range(points_count):
+    classification_line_value = get_classification_line_value(i)
+    if abs(last_line_value - classification_line_value) < 1e-3:
+      continue
+    last_line_value = classification_line_value
+    # Ставим порог и отсекаем позитивные и негативные
+    y_pred = []
+    for j in range(len(y_probs)):
+      y_pred.append(y_positive if y_probs[j][y_positive] >= classification_line_value else y_negative)
+    TP, FP, FN, TN = confusion(y_true, y_pred, y_positive)
+
+    try:
+      FPR = FP / (TN + FP)
+      TPR = TP / (TP + FN)
+
+      FPR_values.append(FPR)
+      TPR_values.append(TPR)
+    except:
+      pass
+
+  return FPR_values, TPR_values
+# функция строит PR кривую
+def Precision_by_Recall(y_true, y_probs, y_positive = 1, y_negative = 0, lines_count = 0):
+  use_probs_for_line = lines_count <= 0
+  y_probs_sorted = sorted([v[y_positive] for v in y_probs], reverse = True)
+  def get_classification_line_value(i):
+    if use_probs_for_line:
+      return y_probs_sorted[i]
+    return 1 - i / lines_count
+
+  points_count = lines_count + 1
+  if use_probs_for_line:
+    points_count = len(y_probs_sorted)
+
+  Recall_values, Precision_values = [0], [1]
+  last_line_value = -123
+  for i in range(points_count):
+    classification_line_value = get_classification_line_value(i)
+    if abs(last_line_value - classification_line_value) < 1e-3:
+      continue
+    last_line_value = classification_line_value
+
+    y_pred = []
+    for j in range(len(y_probs)):
+      y_pred.append(y_positive if y_probs[j][y_positive] >= classification_line_value else y_negative)
+    TP, FP, FN, TN = confusion(y_true, y_pred, y_positive)
+
+    try:
+      Recall = TP / (TP + FN)
+      Precision = TP / (TP + FP)
+
+      Recall_values.append(Recall)
+      Precision_values.append(Precision)
+    except:
+      pass
+
+  return Recall_values, Precision_values
+
+probs = dt.predict_proba(X_test)
 
 
-    accuracy = (tp + tn) / len(y_true) 
-    precision = tp / (tp + fp) 
-    recall = tp / (tp + fn) 
 
-    return accuracy, precision, recall
+TP, FP, FN, TN = confusion(y_test, predictions)
+print("TP, FP, FN, TN = {}, {}, {}, {}".format(TP, FP, FN, TN))
+print("Precision = {}".format(TP / (TP + FP)))
+print("Recall = {}".format(TP / (TP + FN)))
+print("Accuracy = {}".format((TP + TN) / (TP + FP + FN + TN)))
+print(X_test.columns.to_list())
 
-
-def compute_roc_curve(y_true, y_scores):
-    thresholds = np.arange(0, 1.01, 0.01)
-    tpr = []  # True Positive Rate
-    fpr = []  # False Positive Rate
-
-    for threshold in thresholds:
-        y_pred = (y_scores >= threshold).astype(int)
-        tp = np.sum((y_pred == 1) & (y_true == 1))
-        fp = np.sum((y_pred == 1) & (y_true == 0))
-        fn = np.sum((y_pred == 0) & (y_true == 1))
-        tn = np.sum((y_pred == 0) & (y_true == 0))
-        
-        tpr.append(tp / (tp + fn))  # Recall
-        fpr.append(fp / (fp + tn) )  
-
-    return fpr, tpr, thresholds
-
-def compute_pr_curve(y_true, y_scores):
-    thresholds = np.arange(0, 1.01, 0.01)
-    precision = []
-    recall = []
-
-    for threshold in thresholds:
-        y_pred = (y_scores >= threshold).astype(int)
-        tp = np.sum((y_pred == 1) & (y_true == 1))
-        fp = np.sum((y_pred == 1) & (y_true == 0))
-        fn = np.sum((y_pred == 0) & (y_true == 1))
-        
-        precision.append(tp / (tp + fp) )
-        recall.append(tp / (tp + fn))
-
-    return precision, recall
+roc_x, roc_y = TPR_by_FPR(y_test, probs, 1, 0, 0) # 0 указывает, что используется полное распределение вероятностей, а не фиксированное количество линий
+pr_x, pr_y = Precision_by_Recall(y_test, probs, 1, 0, 0)
 
 
-# Пример использования
-if __name__ == "__main__":
+# roc
+plt.plot(roc_x, roc_y, 's-', markersize = 4, label = 'Receiver Operating Characteristic')
 
-    df = pd.read_csv('students.csv')  
+# y=x line
+plt.plot([0, 1], [0, 1], '--')
+plt.xlim(-0.1, 1.3)
+plt.ylim(-0.1, 1.3)
+plt.legend(loc='upper right')
 
-    goal = 5
-    df['SUCCESS'] = df['GRADE'].apply(lambda x: 1 if x >= goal else 0)
-
-    # Извлекаем оценки и метки
-    X = df.drop(columns=['STUDENT ID', 'COURSE ID', 'GRADE', 'SUCCESS'])
-    y = df['SUCCESS']
-
-    # Обучение дерева решений
-    tree = DecisionTree()
-    tree.fit(X, y)
-
-    # Ручное разбиение на обучающую и тестовую выборки
-    np.random.seed(668)  # Для воспроизводимости
-    train_size = int(0.8 * len(df))
-    indices = np.random.permutation(len(df))
-    train_indices = indices[:train_size]
-    test_indices = indices[train_size:]
-
-    X_train = X.iloc[train_indices]
-    y_train = y.iloc[train_indices]
-    X_test = X.iloc[test_indices]
-    y_test = y.iloc[test_indices]
-
-    
-    tree = DecisionTree()
-    tree.fit(X_train, y_train)
-
-    
-    predictions = tree.predict(X_test)
-
-    
-    accuracy, precision, recall = calculate_metrics(y_test, predictions)
-    print("Accuracy:", accuracy)
-    print("Precision:", precision)
-    print("Recall:", recall)
-    
-    # Вычисление ROC и PR кривых
-    fpr, tpr, thresholds_roc = compute_roc_curve(y_test, predictions)
-    precision2, recall2 = compute_pr_curve(y_test, predictions)
-   
-    # Построение ROC-кривой
-    plt.figure(figsize=(12, 5))
-
-    plt.subplot(1, 2, 1)
-    plt.plot(fpr, tpr, marker='o')
-    plt.xlabel('False Positive Rate')
-    plt.ylabel('True Positive Rate')
-    plt.title('ROC Curve')
-    plt.grid()
-
-    # Построение PR-кривой
-    plt.subplot(1, 2, 2)
-    plt.plot(recall2, precision2, marker='o')
-    plt.xlabel('Recall')
-    plt.ylabel('Precision')
-    plt.title('Precision-Recall Curve')
-    plt.grid()
-
-    plt.tight_layout()
-    plt.show()
+plt.show()
 
 
+plt.plot(pr_x, pr_y, 'o-', markersize = 4, label = 'Precision Recall')
+plt.xlim(-0.1, 1.3)
+plt.ylim(-0.1, 1.3)
+
+plt.show()
+
+def integrate_traps(x_values, y_values):
+  return sum([(y_values[i] + y_values[i + 1]) * (x_values[i + 1] - x_values[i]) / 2 for i in range(len(x_values) - 1)])
+     
+
+print("Area under curve ROC = {}".format(integrate_traps(roc_x, roc_y)))
+print("Area under curve PR = {}".format(integrate_traps(pr_x, pr_y)))
+     

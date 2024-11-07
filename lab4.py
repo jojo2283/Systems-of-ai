@@ -2,8 +2,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-
-
 def euclidean_distance(train_data, test_row):
     return np.sqrt(np.sum((train_data - test_row) ** 2, axis=1))
 
