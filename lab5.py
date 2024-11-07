@@ -4,8 +4,8 @@ from random import shuffle
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 
-# Класс, представляющий узел дерева решений.
-class DecisionTreeNode:
+
+class Node:
   def __init__(self, parent_attribute = None, parent_attribute_value = None, attribute = None, entropy = 0.0, samples_count = 0):
     self.parent_attribute = parent_attribute
     self.parent_attribute_value = parent_attribute_value
@@ -16,7 +16,7 @@ class DecisionTreeNode:
     self.probability = dict()
     self.prediction = None
     self.children = list()
-# Метод для предсказания класса для входного примера X
+
   def predict(self, X):
     for child in self.children:
       if X[self.attribute] == child.parent_attribute_value:
@@ -24,7 +24,7 @@ class DecisionTreeNode:
 
     return self.prediction
 
-# Метод для предсказания вероятности классов для входного примера X
+
   def predict_proba(self, X):
     for child in self.children:
       if X[self.attribute] == child.parent_attribute_value:
@@ -33,7 +33,7 @@ class DecisionTreeNode:
     return self.probability
 
 
-class InformationEntropy:
+class Calc:
   def __init__(self, df: pd.DataFrame, y_label: int):
     self.y_label = y_label
     self.y_classes = set(df[y_label].to_list())
@@ -83,18 +83,18 @@ class InformationEntropy:
     return (self.info(df) - self.info_X(df, X_label)) / self.split_info_X(df, X_label)
 
 
-# Класс для построения и использования дерева решений
+
 class DecisionTree:
-  def __init__(self, max_leaf_entropy = 0.0, max_leaf_samples = 1):
-    # assert (max_leaf_entropy > 0) or (max_leaf_samples > 0), "Entropy ratio and samples count to define leaf can't be 0 at once"
+  def __init__(self, max_leaf_entropy , max_leaf_samples):
+    
 
     self.decision_tree_node = None
     self.max_leaf_entropy = max_leaf_entropy
     self.max_leaf_samples = max_leaf_samples
     self.info_entropy = None
-# Рекурсивный метод для построения дерева решений
-  def build_tree(self, df: pd.DataFrame, TreeNode: DecisionTreeNode):
-    print('----')
+
+  def build_tree(self, df: pd.DataFrame, TreeNode):
+
     if df.shape[0] == 0:
       return
 
@@ -111,37 +111,40 @@ class DecisionTree:
     TreeNode.attribute = best_attr
     TreeNode.entropy = best_ratio
     max_samples_count = 0
+
     for y_class in self.info_entropy.y_classes:
       TreeNode.samples[y_class] = df.loc[df[self.info_entropy.y_label] == y_class].shape[0]
       TreeNode.probability[y_class] = TreeNode.samples[y_class] / df.shape[0]
       if max_samples_count < TreeNode.samples[y_class]:
         max_samples_count = TreeNode.samples[y_class]
         TreeNode.prediction = y_class
+
     TreeNode.samples_count = df.shape[0]
+
     if (TreeNode.entropy > self.max_leaf_entropy) and (TreeNode.samples_count > self.max_leaf_samples):
       for attr in self.info_entropy.X_values[best_attr]:
         df_loc = df.loc[df[best_attr] == attr]
-        print(df_loc)
+        
         if df_loc.shape[0] > 0:
-          child = DecisionTreeNode()
+          child = Node()
           child.parent_attribute = best_attr
           child.parent_attribute_value = attr
           TreeNode.children.append(child)
           self.build_tree(df_loc, TreeNode.children[-1])
-# Метод для обучения дерева решений на данных
-  def fit(self, df: pd.DataFrame, y_label: int):
-    self.info_entropy = InformationEntropy(df, y_label)
-    self.decision_tree_node = DecisionTreeNode()
+
+  def fit(self, df, y_label):
+    self.info_entropy = Calc(df, y_label)
+    self.decision_tree_node = Node()
     self.build_tree(df, self.decision_tree_node)
     return self
-# Метод для предсказания классов для входных данных
-  def predict(self, X_test: pd.DataFrame):
+
+  def predict(self, X_test):
     y_test = []
     for i in range(X_test.shape[0]):
       y_test.append(self.decision_tree_node.predict(X_test.iloc[i]))
     return y_test
-# Метод для предсказания вероятностей классов для входных данных
-  def predict_proba(self, X_test: pd.DataFrame):
+
+  def predict_proba(self, X_test):
     y_test = []
     for i in range(X_test.shape[0]):
       y_test.append(self.decision_tree_node.predict_proba(X_test.iloc[i]))
@@ -194,29 +197,23 @@ def confusion(y_true, y_pred):
       else:
         TN += 1
   return TP, FP, FN, TN
-# функция строит ROC-кривую
-def TPR_by_FPR(y_true, y_probs, y_positive = 1, y_negative = 0, lines_count = 0):
-  use_probs_for_line = lines_count <= 0
+
+
+
+def TPR_by_FPR(y_true, y_probs, y_positive = 1, y_negative = 0): 
   y_probs_sorted = sorted([v[y_positive] for v in y_probs], reverse = True)
-  # Получение следующее значение прямой классификации
-  def get_classification_line_value(i):
-    if use_probs_for_line:
-      return y_probs_sorted[i]
-    return 1 - i / lines_count
-  # Количество точек в ROC
-  points_count = lines_count + 1
-  if use_probs_for_line:
-    points_count = len(y_probs_sorted)
-  # Списки значений
+  points_count = len(y_probs_sorted)
+  
   FPR_values, TPR_values = [0], [0]
-  last_line_value = -123
+  last_line_value = -1000
   for i in range(points_count):
-    classification_line_value = get_classification_line_value(i)
+    classification_line_value = y_probs_sorted[i]
     if abs(last_line_value - classification_line_value) < 1e-3:
       continue
     last_line_value = classification_line_value
-    # Ставим порог и отсекаем позитивные и негативные
+    
     y_pred = []
+
     for j in range(len(y_probs)):
       y_pred.append(y_positive if y_probs[j][y_positive] >= classification_line_value else y_negative)
     TP, FP, FN, TN = confusion(y_true, y_pred)
@@ -231,23 +228,15 @@ def TPR_by_FPR(y_true, y_probs, y_positive = 1, y_negative = 0, lines_count = 0)
       pass
 
   return FPR_values, TPR_values
-# функция строит PR кривую
-def Precision_by_Recall(y_true, y_probs, y_positive = 1, y_negative = 0, lines_count = 0):
-  use_probs_for_line = lines_count <= 0
-  y_probs_sorted = sorted([v[y_positive] for v in y_probs], reverse = True)
-  def get_classification_line_value(i):
-    if use_probs_for_line:
-      return y_probs_sorted[i]
-    return 1 - i / lines_count
 
-  points_count = lines_count + 1
-  if use_probs_for_line:
-    points_count = len(y_probs_sorted)
+def Precision_by_Recall(y_true, y_probs, y_positive , y_negative):
+  y_probs_sorted = sorted([v[y_positive] for v in y_probs], reverse = True)
+  points_count = len(y_probs_sorted)
 
   Recall_values, Precision_values = [0], [1]
-  last_line_value = -123
+  last_line_value = -1000
   for i in range(points_count):
-    classification_line_value = get_classification_line_value(i)
+    classification_line_value = y_probs_sorted[i]
     if abs(last_line_value - classification_line_value) < 1e-3:
       continue
     last_line_value = classification_line_value
@@ -279,8 +268,8 @@ print("Recall = {}".format(TP / (TP + FN)))
 print("Accuracy = {}".format((TP + TN) / (TP + FP + FN + TN)))
 print(X_test.columns.to_list())
 
-roc_x, roc_y = TPR_by_FPR(y_test, probs, 1, 0, 0) # 0 указывает, что используется полное распределение вероятностей, а не фиксированное количество линий
-pr_x, pr_y = Precision_by_Recall(y_test, probs, 1, 0, 0)
+roc_x, roc_y = TPR_by_FPR(y_test, probs, 1, 0) 
+pr_x, pr_y = Precision_by_Recall(y_test, probs, 1, 0)
 
 
 # roc
