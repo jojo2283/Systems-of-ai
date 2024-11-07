@@ -41,10 +41,9 @@ class InformationEntropy:
     for label in df.columns:
       if label != y_label:
         self.X_values[label] = set(df[label].to_list())
-# Метод для подсчета частоты появления класса в данных
+
   def freq(self, df, C_j):
     return df.loc[df[self.y_label] == C_j].shape[0]
-# Метод для вычисления энтропии для всего набора данных
   def info(self, df):
     if df.shape[0] == 0:
       return 0
@@ -56,7 +55,7 @@ class InformationEntropy:
         continue
       result -= freq_c_div_df * np.log2(freq_c_div_df)
     return result
-# Метод для вычисления взвешенной энтропии для конкретного признака
+
   def info_X(self, df, X_label):
     if df.shape[0] == 0:
       return 0
@@ -69,7 +68,7 @@ class InformationEntropy:
       result += df_i.shape[0] * self.info(df_i)
     result /= df.shape[0]
     return result
-# Метод для вычисления "split information" для конкретного признака
+
   def split_info_X(self, df, X_label):
     result = 1e-9
     for attr in self.X_values[X_label]:
@@ -79,7 +78,7 @@ class InformationEntropy:
       df_i_div_df = df_i.shape[0] / df.shape[0]
       result -= df_i_div_df * np.log2(df_i_div_df)
     return result
-# Метод для вычисления относительного выигрыша признака
+
   def gain_ratio_X(self, df, X_label):
     return (self.info(df) - self.info_X(df, X_label)) / self.split_info_X(df, X_label)
 
@@ -170,7 +169,7 @@ y_classes_count=2
 
 data_n = df[X_labels + [y_label]]
 
-X_train, X_test, y_train, y_test = train_test_split(data_n.drop(columns=[y_label]), data_n[y_label], test_size=0.8, random_state=0)
+X_train, X_test, y_train, y_test = train_test_split(data_n.drop(columns=[y_label]), data_n[y_label], test_size=0.2, random_state=0)
 
 df_train = X_train.join(y_train)
 y_test = y_test.to_list()
@@ -178,16 +177,16 @@ y_test = y_test.to_list()
 dt = DecisionTree(0.001, 10).fit(df_train, y_label)
 predictions = dt.predict(X_test)
 
-def confusion(y_true, y_pred, y_positive = 1):
+def confusion(y_true, y_pred):
   TP, FP, FN, TN = 0, 0, 0, 0
   for i in range(len(y_true)):
-    if y_pred[i] == y_positive:
-      if y_true[i] == y_positive:
+    if y_pred[i] == 1:
+      if y_true[i] == 1:
         TP += 1
       else:
         FP += 1
     else:
-      if y_true[i] == y_positive:
+      if y_true[i] == 1:
         FN += 1
       else:
         TN += 1
@@ -217,7 +216,7 @@ def TPR_by_FPR(y_true, y_probs, y_positive = 1, y_negative = 0, lines_count = 0)
     y_pred = []
     for j in range(len(y_probs)):
       y_pred.append(y_positive if y_probs[j][y_positive] >= classification_line_value else y_negative)
-    TP, FP, FN, TN = confusion(y_true, y_pred, y_positive)
+    TP, FP, FN, TN = confusion(y_true, y_pred)
 
     try:
       FPR = FP / (TN + FP)
@@ -253,7 +252,7 @@ def Precision_by_Recall(y_true, y_probs, y_positive = 1, y_negative = 0, lines_c
     y_pred = []
     for j in range(len(y_probs)):
       y_pred.append(y_positive if y_probs[j][y_positive] >= classification_line_value else y_negative)
-    TP, FP, FN, TN = confusion(y_true, y_pred, y_positive)
+    TP, FP, FN, TN = confusion(y_true, y_pred)
 
     try:
       Recall = TP / (TP + FN)
