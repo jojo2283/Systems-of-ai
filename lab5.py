@@ -34,7 +34,7 @@ class DecisionTreeNode:
 
 
 class InformationEntropy:
-  def __init__(self, df: pd.DataFrame, y_label: str):
+  def __init__(self, df: pd.DataFrame, y_label: int):
     self.y_label = y_label
     self.y_classes = set(df[y_label].to_list())
     self.X_values = dict()
@@ -86,7 +86,7 @@ class InformationEntropy:
 # Класс для построения и использования дерева решений
 class DecisionTree:
   def __init__(self, max_leaf_entropy = 0.0, max_leaf_samples = 1):
-    assert (max_leaf_entropy > 0) or (max_leaf_samples > 0), "Entropy ratio and samples count to define leaf can't be 0 at once"
+    # assert (max_leaf_entropy > 0) or (max_leaf_samples > 0), "Entropy ratio and samples count to define leaf can't be 0 at once"
 
     self.decision_tree_node = None
     self.max_leaf_entropy = max_leaf_entropy
@@ -94,6 +94,7 @@ class DecisionTree:
     self.info_entropy = None
 # Рекурсивный метод для построения дерева решений
   def build_tree(self, df: pd.DataFrame, TreeNode: DecisionTreeNode):
+    print('----')
     if df.shape[0] == 0:
       return
 
@@ -101,9 +102,11 @@ class DecisionTree:
     best_ratio = 0
     for attr in self.info_entropy.X_values:
       ratio = self.info_entropy.gain_ratio_X(df, attr)
+      
       if best_ratio < ratio:
         best_attr = attr
         best_ratio = ratio
+   
 
     TreeNode.attribute = best_attr
     TreeNode.entropy = best_ratio
@@ -115,10 +118,10 @@ class DecisionTree:
         max_samples_count = TreeNode.samples[y_class]
         TreeNode.prediction = y_class
     TreeNode.samples_count = df.shape[0]
-
     if (TreeNode.entropy > self.max_leaf_entropy) and (TreeNode.samples_count > self.max_leaf_samples):
       for attr in self.info_entropy.X_values[best_attr]:
         df_loc = df.loc[df[best_attr] == attr]
+        print(df_loc)
         if df_loc.shape[0] > 0:
           child = DecisionTreeNode()
           child.parent_attribute = best_attr
@@ -126,7 +129,7 @@ class DecisionTree:
           TreeNode.children.append(child)
           self.build_tree(df_loc, TreeNode.children[-1])
 # Метод для обучения дерева решений на данных
-  def fit(self, df: pd.DataFrame, y_label: str):
+  def fit(self, df: pd.DataFrame, y_label: int):
     self.info_entropy = InformationEntropy(df, y_label)
     self.decision_tree_node = DecisionTreeNode()
     self.build_tree(df, self.decision_tree_node)
